@@ -10,35 +10,37 @@ use tw_api::tw_api::{Credentials, QuranTweet};
 
 
 fn main() {
-    println!("Quran Twitter bot v5...");
+    println!("Welcome to Quran Twitter bot v5");
     println!("Getting twitter client...");
     let cred = Credentials::from_env().expect("Error loading credentials");
     let client = TwClient::new(cred);
-
+    println!("{}", String::from("Client created successfully").color("green"));
     let verses = CsvReader::<Verse>::get("quran-dataset.csv".into()).expect("Error reading csv");
+    const MAX_LEN: usize = 170;
     loop {
         println!("Getting a random verse..");
-        let v = verses.choose(&mut rand::thread_rng()).expect("Error getting the verse");
-        // while v.ayah_en.chars().count() > 140 {
-        //     println!("Verse too long, choosing another");
-        //     v =verses.choose(&mut rand::thread_rng()).expect("Error getting the verse"); 
-        // }
+        let mut v = verses.choose(&mut rand::thread_rng()).expect("Error getting the verse");
+        while v.ayah_en.chars().count() > MAX_LEN || v.ayah_ar.chars().count() > MAX_LEN {
+            println!("Verse too long, choosing another");
+            v =verses.choose(&mut rand::thread_rng()).expect("Error getting the verse"); 
+        }
         let tweet_content = QuranTweet::from(&v);
         println!("New tweet created:");
-        println!("{}", &tweet_content.fmt_tweet().text.color("blue"));
+        println!("\n{}", &tweet_content.fmt_tweet().text.color("blue"));
+        println!("{}\n", &tweet_content.fmt_tweet_tr(String::new()).text.color("blue"));
         
         if let Err(er) = client.send(tweet_content) {
-
-            if let Some(s) = er.downcast_ref::<TweetError>() {
-                println!("Tweet error: {}", s);
+            match er.downcast_ref::<TweetError>() {
+                Some(e) => {
+                    println!("Tweet error: {}", e);
                 thread::sleep(Duration::from_secs(100));
                 continue;
-            } else {
-                panic!("Non tweet error!");
+                },
+                None => panic!("Non tweet posting error: {}", er)
             }
         }
 
-        println!("Tweet sent successfully!");
+        println!("{}", String::from("Tweet sent successfully!").color("green"));
         thread::sleep(Duration::from_secs_f32(7200f32));
     }
 }

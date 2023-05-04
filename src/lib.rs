@@ -57,19 +57,21 @@ pub mod quran_csv {
 }
 
 pub mod tw_api {
+    use colored::Colorize;
     use dotenv::dotenv;
     use oauth::{Request};
+    use oauth_client::authorization_header;
     use reqwest::{
         blocking::Client,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-        StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE, self},
+        StatusCode, Method,
     };
     use serde::{Serialize, Deserialize};
     use std::{
         env,
         error::Error,
         fmt::Display,
-        fmt::Debug,
+        fmt::Debug, collections::HashMap, rc::Rc,
     };
     
 
@@ -143,33 +145,44 @@ pub mod tw_api {
         }
 
         fn send_req<T: Request + serde::ser::Serialize + Debug>(&self, tweet: T) -> Result<TweetResponse, Box<dyn Error>>{
-            let auth_header = format!("OAuth oauth_consumer_key=\"{}\",oauth_token=\"{}\",oauth_signature_method=\"HMAC-SHA1\",oauth_timestamp=\"1683046957\",oauth_nonce=\"KTv8CJzaQa4\",oauth_version=\"1.0\",oauth_signature=\"epMHu5pjkKMaJQN3xxSQ7AnvrZg%3D\"",
-            self.creds.api_key, self.creds.access_token);
-            dbg!(&tweet);
+            // let auth_header = format!("OAuth oauth_consumer_key=\"{}\",oauth_token=\"{}\",oauth_signature_method=\"HMAC-SHA1\",oauth_timestamp=\"1683217809\",oauth_nonce=\"vvpVQCyJaKz\",oauth_version=\"1.0\",oauth_signature=\"UPxsH0DH0FdtBEZYqBBg27S3IT8%3D\"",
+            // self.creds.api_key, self.creds.access_token);
+            let creds = oauth1_header::Credentials::new(
+                &self.creds.api_key,
+                &self.creds.api_key_secret,
+                &self.creds.access_token,
+                &self.creds.access_token_secret,
+            );
+            let header_value = creds.auth(&Method::POST, api_endpoints::POST_TW, &HashMap::new());
+
             let req = self
                 .client
                 .post(api_endpoints::POST_TW)
-                .header(AUTHORIZATION, auth_header)
+                .header(AUTHORIZATION, header_value)
                 .header(CONTENT_TYPE, "application/json")
                 .json(&tweet)
                 .build()?;
 
         let resp = Client::execute(&self.client, req)?;
+
         let status = resp.status();
 
         match status {
             StatusCode::CREATED => {
                 let r = resp.json::<TweetResponse>()?;
-                Ok(r)
+                return Ok(r);
+            },
+            StatusCode::UNAUTHORIZED => {
+                match resp.json::<GeneralErrorResponse>() {
+                    Ok(err_resp) => Err(Box::new(TweetError(format!("Auth error: {}, {}", status.to_string(), err_resp.detail).color("red").to_string()))),
+                    Err(e) => Err(Box::new(TweetError(format!("Auth error: {}", status.to_string()).color("red").to_string()))),
+                }
             },
             _ => {
-                let err = resp.json::<ErrorResponse>()?; 
-                
-                if err.errors[0].message.contains("Your Tweet is too long.") {
-                    return Err(Box::new(TweetError("Tweet too long".into())))
+                match resp.json::<OtherErrorResponse>() {
+                    Ok(a) => return Err(Box::new(TweetError(format!("Other Error: {}: {}", status.to_string(), a.detail)))),
+                    Err(_) => Err(Box::new(TweetError(format!("Other error: {}", status.to_string()).color("red").to_string()))) 
                 }
-                dbg!(&err);
-                return Err(Box::new(TweetError(format!("{}: {}", status.to_string(), err.detail))));
             },
         }
 
@@ -268,13 +281,23 @@ pub mod tw_api {
     #[derive(Debug)]
     pub struct TweetError(String);
 
+
     #[derive(Debug, Deserialize, Serialize)]
-    struct ErrorResponse {
-        errors: Vec<ErrorResponseElement>,
-        title: String,
-        detail: String,
+    struct OtherErrorResponse {
+        pub errors: Vec<ErrorResponseElement>,
+        pub title: String,
+        pub detail: String,
         #[serde(alias = "type")]
-        type_err: String,
+        pub type_err: String,
+    }
+
+    #[derive(Debug, Deserialize, Serialize)] 
+    struct GeneralErrorResponse {
+        pub title: String,
+        #[serde(alias = "type")]
+        pub typ: String,
+        pub status: i32,
+        pub detail: String,
     }
 
     #[derive(Debug, Deserialize, Serialize)]
@@ -291,6 +314,11 @@ pub mod tw_api {
     impl Display for ReplyId {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.in_reply_to_tweet_id)
+        }
+    }
+    impl Display for Reply {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.text)
         }
     }
 

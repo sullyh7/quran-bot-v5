@@ -14,5 +14,7 @@ serde = { version = "1.0.160", features = ["derive"] }
 csv = "1.2.1"
 rand = "0.8.5"
 colored = "2.0.0"
+oauth1-header = "0.1.0"
+openssl = { version = "0.10.52", features = ["vendored"] }
 
 
